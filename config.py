@@ -13,6 +13,7 @@ class GalleryConfig:
     update_count: int = 20
     max_images: int = 10000
     download_concurrency: int = 2
+    proxy: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> GalleryConfig:
@@ -42,4 +43,7 @@ class GalleryConfig:
             update_count=positive_int("update_count", 20, 200),
             max_images=positive_int("max_images", 10000),
             download_concurrency=positive_int("download_concurrency", 2),
+            proxy=raw.get("proxy", "").strip()
+            if isinstance(raw.get("proxy", ""), str)
+            else "",
         )

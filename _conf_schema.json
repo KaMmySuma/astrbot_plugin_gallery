@@ -28,5 +28,11 @@
     "hint": "同时下载 Danbooru 图片的最大数量。",
     "type": "int",
     "default": 2
+  },
+  "proxy": {
+    "description": "网络代理",
+    "hint": "用于 Danbooru API 和图片下载的代理地址；留空则不使用代理。",
+    "type": "string",
+    "default": ""
   }
 }

@@ -18,7 +18,6 @@ from .api.danbooru import (
     CORE_TAG,
     DANBOORU_HEADERS,
     DANBOORU_IMAGE_HEADERS,
-    DANBOORU_PROXY,
     fetch_danbooru_images,
     load_danbooru_cursor,
     save_danbooru_cursor,
@@ -55,7 +54,7 @@ class GalleryPlugin(Star):
         await self.gallery.initialize()
         self.http_client = httpx.AsyncClient(
             http2=True,
-            proxy=DANBOORU_PROXY,
+            proxy=self.config.proxy or None,
             timeout=httpx.Timeout(20.0, connect=10.0),
             follow_redirects=True,
             trust_env=False,
@@ -63,7 +62,7 @@ class GalleryPlugin(Star):
         )
         self.image_client = AsyncSession(
             impersonate="chrome",
-            proxy=DANBOORU_PROXY,
+            proxy=self.config.proxy or None,
             timeout=20.0,
             headers=DANBOORU_IMAGE_HEADERS,
         )
@@ -376,7 +375,6 @@ class GalleryPlugin(Star):
         # 群聊必须 @Bot / 被唤醒
         return event.is_at_or_wake_command
 
-
     # @filter.command("洁图", alias={"来张洁图"})
     @filter.regex(r"^(?!.*洁图统计)(?=.*洁图|(?=.*安洁)(?=.*照片)).*$")
     async def random_image(
@@ -395,7 +393,7 @@ class GalleryPlugin(Star):
                 Comp.At(qq=event.get_sender_id()),
                 Comp.Plain(" 博士，您的小可爱已抵达！\n"),
                 Comp.Image.fromFileSystem(path=str(Path(image["file_path"]).resolve())),
-                Comp.Plain(f"\n嘿嘿，拍的怎么样啊博士？我好看吗？")
+                Comp.Plain(f"\n嘿嘿，拍的怎么样啊博士？我好看吗？"),
             ]
         )
         return

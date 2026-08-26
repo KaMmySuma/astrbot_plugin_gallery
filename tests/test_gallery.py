@@ -44,6 +44,19 @@ def test_download_concurrency_config_has_safe_default() -> None:
     )
 
 
+def test_proxy_config_is_optional_and_normalized() -> None:
+    """Use no proxy by default and trim configured proxy URLs."""
+
+    assert config_module.GalleryConfig.from_dict({}).proxy == ""
+    assert (
+        config_module.GalleryConfig.from_dict(
+            {"proxy": "  http://127.0.0.1:7890  "}
+        ).proxy
+        == "http://127.0.0.1:7890"
+    )
+    assert config_module.GalleryConfig.from_dict({"proxy": 123}).proxy == ""
+
+
 def test_database_sync_and_multitag(tmp_path: Path) -> None:
     """Synchronize manual files and preserve many tags for automatic files."""
 

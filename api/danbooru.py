@@ -7,7 +7,6 @@ from typing import Any
 import httpx
 
 DANBOORU_POSTS_URL = "https://danbooru.donmai.us/posts.json"
-DANBOORU_PROXY = "http://127.0.0.1:7890"
 DANBOORU_HEADERS = {
     "accept": "application/json, text/plain, */*",
     "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -77,6 +76,7 @@ async def fetch_danbooru_images(
     count: int,
     client: httpx.AsyncClient | None = None,
     page: int | str | None = None,
+    proxy: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch Safe Angelina posts and normalize complete Danbooru metadata.
 
@@ -85,6 +85,7 @@ async def fetch_danbooru_images(
         client: Optional shared HTTP client owned by the plugin.
         page: Optional Danbooru page or ``b<post_id>`` cursor used to walk
             backwards through history.
+        proxy: Optional proxy URL used when creating a private HTTP client.
 
     Returns:
         Normalized post dictionaries with URL, hash, extension, timestamps and tags.
@@ -98,7 +99,7 @@ async def fetch_danbooru_images(
     owns_client = client is None
     request_client = client or httpx.AsyncClient(
         http2=True,
-        proxy=DANBOORU_PROXY,
+        proxy=proxy or None,
         timeout=httpx.Timeout(20.0, connect=10.0),
         follow_redirects=True,
         trust_env=False,
