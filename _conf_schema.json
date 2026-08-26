@@ -1,0 +1,32 @@
+{
+  "auto_update_enabled": {
+    "description": "启用图库自动更新",
+    "hint": "启动后立即执行一次更新，之后按照配置的时间间隔重复更新。",
+    "type": "bool",
+    "default": true
+  },
+  "update_interval_minutes": {
+    "description": "更新间隔（分钟）",
+    "hint": "小于 1 的值将替换为默认值 60。",
+    "type": "int",
+    "default": 60
+  },
+  "update_count": {
+    "description": "每次更新请求的新图片数量",
+    "hint": "从 angelina_(arknights) 获取最多指定数量的新版安全级别图片，必要时会在限定页数内向前翻页查找。",
+    "type": "int",
+    "default": 20
+  },
+  "max_images": {
+    "description": "图库最大图片数量",
+    "hint": "统一图片目录中的图片总数。超过此数量时，旧的自动下载图片可能会被移除。",
+    "type": "int",
+    "default": 10000
+  },
+  "download_concurrency": {
+    "description": "图片下载并发数",
+    "hint": "同时下载 Danbooru 图片的最大数量。",
+    "type": "int",
+    "default": 2
+  }
+}
