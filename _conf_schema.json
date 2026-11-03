@@ -31,8 +31,27 @@
   },
   "proxy": {
     "description": "网络代理",
-    "hint": "用于 Danbooru API 和图片下载的代理地址；留空则不使用代理。",
+    "hint": "用于 Danbooru API 和图片下载的代理地址，例如 http://127.0.0.1:7890；留空时回退到 HTTPS_PROXY/HTTP_PROXY 环境变量，都没有则直连。",
     "type": "string",
     "default": ""
+  },
+  "cookie": {
+    "description": "Cloudflare 验证 Cookie",
+    "hint": "当日志出现 Danbooru returned a Cloudflare challenge 时填写。用同一个代理在浏览器打开 danbooru.donmai.us 通过验证，复制 cf_clearance（可连同 __cf_bm）Cookie，形如 cf_clearance=xxxx。Cookie 与出口 IP 绑定，更换代理后需重新获取。",
+    "type": "text",
+    "default": ""
+  },
+  "login": {
+    "description": "Danbooru 用户名（可选）",
+    "hint": "填写后使用 HTTP Basic 认证请求，提高 Danbooru 接口速率上限。不会绕过 Cloudflare 人机验证。",
+    "type": "string",
+    "default": ""
+  },
+  "api_key": {
+    "description": "Danbooru API Key（可选）",
+    "hint": "在 Danbooru 个人设置页获取，与用户名配合使用。仅遮罩显示，存储不加密。",
+    "type": "string",
+    "default": "",
+    "secret": true
   }
 }

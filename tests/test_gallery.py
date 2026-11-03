@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib
 import logging
 import math
@@ -55,6 +56,32 @@ def test_proxy_config_is_optional_and_normalized() -> None:
         == "http://127.0.0.1:7890"
     )
     assert config_module.GalleryConfig.from_dict({"proxy": 123}).proxy == ""
+
+
+def test_cookie_config_is_parsed_for_cloudflare() -> None:
+    """Turn a pasted browser cookie string into a request mapping."""
+    assert config_module.GalleryConfig.from_dict({}).cookie == ""
+    assert config_module.parse_cookie_header("cf_clearance=abc; __cf_bm=x=y") == {
+        "cf_clearance": "abc",
+        "__cf_bm": "x=y",
+    }
+    assert config_module.parse_cookie_header("") == {}
+
+
+def test_danbooru_auth_uses_basic_header() -> None:
+    """Send credentials in a header instead of the query string."""
+    header = danbooru._auth_header("KaMmySuma", "secret")
+    assert header["authorization"].startswith("Basic ")
+    decoded = base64.b64decode(header["authorization"].split(" ", 1)[1]).decode()
+    assert decoded == "KaMmySuma:secret"
+    assert danbooru._auth_header("", "secret") == {}
+    assert danbooru._auth_header("KaMmySuma", "") == {}
+
+
+def test_danbooru_headers_do_not_override_user_agent() -> None:
+    """Keep curl_cffi impersonation in charge of the user agent."""
+    assert "user-agent" not in danbooru.DANBOORU_HEADERS
+    assert "user-agent" not in danbooru.DANBOORU_IMAGE_HEADERS
 
 
 def test_database_sync_and_multitag(tmp_path: Path) -> None:
@@ -196,7 +223,7 @@ def test_danbooru_adapter_normalizes_complete_payload() -> None:
 
     async def scenario() -> None:
         def handler(request: httpx.Request) -> httpx.Response:
-            assert request.url.params["tags"] == "angelina_(arknights) rating:s"
+            assert request.url.params["tags"] == "angelina_(arknights) rating:g,s"
             assert request.url.params["search[order]"] == "id_desc"
             assert request.url.params["page"] == "b41"
             assert request.url.params["limit"] == "200"
@@ -227,17 +254,24 @@ def test_danbooru_adapter_normalizes_complete_payload() -> None:
 
 def test_danbooru_cursor_round_trip(tmp_path: Path) -> None:
     """Persist and reload the historical cursor and exhausted state."""
-    danbooru.save_danbooru_cursor(tmp_path, "b123", False)
-    assert danbooru.load_danbooru_cursor(tmp_path) == {
+    query = danbooru.DANBOORU_QUERY
+    danbooru.save_danbooru_cursor(tmp_path, "b123", False, query)
+    assert danbooru.load_danbooru_cursor(tmp_path, query) == {
         "cursor": "b123",
         "exhausted": False,
     }
 
-    danbooru.save_danbooru_cursor(tmp_path, "b1", True)
-    assert danbooru.load_danbooru_cursor(tmp_path) == {
+    danbooru.save_danbooru_cursor(tmp_path, "b1", True, query)
+    assert danbooru.load_danbooru_cursor(tmp_path, query) == {
         "cursor": "b1",
         "exhausted": True,
     }
+
+
+def test_danbooru_cursor_resets_when_query_changes(tmp_path: Path) -> None:
+    """Discard a cursor written for a different tag query so history is rewalked."""
+    danbooru.save_danbooru_cursor(tmp_path, "b1", True, "angelina_(arknights) rating:s")
+    assert danbooru.load_danbooru_cursor(tmp_path, danbooru.DANBOORU_QUERY) == {}
 
 
 def test_update_skips_unsupported_formats_without_blocking_count_or_cursor(

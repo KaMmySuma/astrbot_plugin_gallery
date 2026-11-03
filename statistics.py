@@ -382,7 +382,12 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
                     "Invalid statistics cover focus for tag %s; using normal cover",
                     display_name,
                 )
-    total = sum(counts.values())
+    pie_total = sum(counts.values())
+    # Per-tag counts overlap, so the displayed total must be the distinct
+    # number of images carrying at least one of the eight tags.
+    distinct_total = await gallery.database.count_distinct_for_tags(
+        list(TAG_MAPPING.values())
+    )
     background_row = random.choice(rows)
     canvas_size = (1200, 850)
     with Image.open(background_row["file_path"]) as source:
@@ -418,7 +423,7 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
     )
     draw.text(
         (750, 155),
-        f"总计 {total} 张",
+        f"总计 {distinct_total} 张",
         fill=(35, 35, 35),
         font=_font(40, True, META_FONT_PATH),
     )
@@ -428,9 +433,9 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
     boundaries: list[tuple[float, float, tuple[int, int, int]]] = []
     for tag in TAG_MAPPING:
         count = counts[tag]
-        if not count or not total:
+        if not count or not pie_total:
             continue
-        extent = count / total * 360
+        extent = count / pie_total * 360
         mask = Image.new("L", canvas_size, 0)
         ImageDraw.Draw(mask).pieslice(
             (
@@ -525,7 +530,7 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
     y = 220
     for tag in TAG_MAPPING:
         count = counts[tag]
-        percent = count / total * 100 if total else 0
+        percent = count / pie_total * 100 if pie_total else 0
         draw.ellipse((750, y, 784, y + 34), fill=TAG_COLORS[tag])
         draw.text(
             (802, y - 2),
@@ -553,9 +558,11 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
         y += 64
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     latest = state.get("last_update", "暂无记录")
+    failures = state.get("consecutive_failures")
+    last_error = state.get("last_error")
     draw.text(
         (60, 770),
-        "更新时间：",
+        "统计时间：",
         fill=(70, 70, 70),
         font=_font(18, font_path=META_FONT_PATH),
     )
@@ -567,7 +574,7 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
     )
     draw.text(
         (60, 805),
-        "上次更新：",
+        "上次成功：",
         fill=(70, 70, 70),
         font=_font(18, font_path=META_FONT_PATH),
     )
@@ -577,6 +584,17 @@ async def generate_statistics_image(gallery: Gallery) -> Path | None:
         fill=(70, 70, 70),
         font=_font(18, font_path=TAG_FONT_PATH),
     )
+    if isinstance(failures, int) and failures > 0:
+        suffix = f"（连续失败 {failures} 次"
+        if isinstance(last_error, str) and last_error:
+            suffix += f"：{last_error[:40]}"
+        suffix += "）"
+        draw.text(
+            (360, 805),
+            suffix,
+            fill=(200, 45, 45),
+            font=_font(16, font_path=TAG_FONT_PATH),
+        )
     output = gallery.output_dir / "statistics.png"
     canvas.convert("RGB").save(output, "PNG")
     return output

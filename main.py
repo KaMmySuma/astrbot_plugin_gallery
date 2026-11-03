@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 from curl_cffi.requests import AsyncSession
 
 import astrbot.api.message_components as Comp
@@ -16,13 +15,16 @@ from astrbot.api.star import Context, Star, StarTools, register
 
 from .api.danbooru import (
     CORE_TAG,
-    DANBOORU_HEADERS,
     DANBOORU_IMAGE_HEADERS,
+    DANBOORU_QUERY,
+    DanbooruConnectionError,
+    close_danbooru_client,
+    create_danbooru_client,
     fetch_danbooru_images,
     load_danbooru_cursor,
     save_danbooru_cursor,
 )
-from .config import GalleryConfig
+from .config import GalleryConfig, parse_cookie_header, resolve_proxy
 from .downloader import ALLOWED_EXTENSIONS, MAX_IMAGE_SIZE, ImageDownloader
 from .gallery import TAG_MAPPING, Gallery
 from .scheduler import GalleryScheduler
@@ -33,7 +35,7 @@ from .statistics import generate_statistics_image
     "astrbot_plugin_gallery",
     "Abyss",
     "基于SQLite多标签元数据的 Safe Dance Angelina 同人图管理",
-    "1.0.0",
+    "1.0.1",
     "没有喵",
 )
 class GalleryPlugin(Star):
@@ -43,28 +45,37 @@ class GalleryPlugin(Star):
         super().__init__(context, config)
         self.config = GalleryConfig.from_dict(config)
         self.gallery = Gallery(StarTools.get_data_dir("astrbot_plugin_gallery"))
-        self.http_client: httpx.AsyncClient | None = None
+        self.http_client: AsyncSession | None = None
         self.image_client: AsyncSession | None = None
         self.downloader: ImageDownloader | None = None
         self.scheduler: GalleryScheduler | None = None
+        self.proxy: str | None = None
         self._update_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize files, SQLite, shared HTTP resources, and the scheduler."""
         await self.gallery.initialize()
-        self.http_client = httpx.AsyncClient(
-            http2=True,
-            proxy=self.config.proxy or None,
-            timeout=httpx.Timeout(20.0, connect=10.0),
-            follow_redirects=True,
-            trust_env=False,
-            headers=DANBOORU_HEADERS,
+        proxy = resolve_proxy(self.config.proxy)
+        self.proxy = proxy
+        if proxy:
+            self.logger.info("Danbooru requests will use proxy %s.", proxy)
+        else:
+            self.logger.warning(
+                "No proxy configured for Danbooru requests; direct connections "
+                "may be blocked. Set the plugin proxy option if updates fail."
+            )
+        self.http_client = create_danbooru_client(
+            proxy,
+            self.config.cookie,
+            self.config.login,
+            self.config.api_key,
         )
         self.image_client = AsyncSession(
             impersonate="chrome",
-            proxy=self.config.proxy or None,
+            proxy=proxy,
             timeout=20.0,
             headers=DANBOORU_IMAGE_HEADERS,
+            cookies=parse_cookie_header(self.config.cookie) or None,
         )
         self.downloader = ImageDownloader(self.image_client)
         if self.config.auto_update_enabled:
@@ -83,7 +94,7 @@ class GalleryPlugin(Star):
             await self.scheduler.wait_stopped()
             self.scheduler = None
         if self.http_client is not None:
-            await self.http_client.aclose()
+            await close_danbooru_client(self.http_client)
             self.http_client = None
             self.downloader = None
         if self.image_client is not None:
@@ -91,6 +102,30 @@ class GalleryPlugin(Star):
             self.image_client = None
         await self.gallery.close()
         self.logger.info("Gallery plugin resources were released.")
+
+    def _log_request_failure(self, exc: Exception) -> None:
+        """Log a Danbooru request failure with an actionable proxy hint.
+
+        Args:
+            exc: Exception raised by the HTTP client.
+        """
+        self.logger.exception("Danbooru API request failed.")
+        target = self.proxy or "direct connection"
+        if isinstance(exc, DanbooruConnectionError):
+            self.logger.error(
+                "Cannot open a TCP connection via %s. Verify the proxy address "
+                "is reachable from the AstrBot container: use the container "
+                "gateway IP or host.docker.internal, and make the proxy listen "
+                "on 0.0.0.0 instead of a single docker bridge address.",
+                target,
+            )
+        elif "Cloudflare challenge" in str(exc):
+            self.logger.error(
+                "Danbooru answered with a Cloudflare challenge via %s. The exit "
+                "IP is flagged: switch to another proxy node or a residential "
+                "exit, then retry.",
+                target,
+            )
 
     async def update_gallery(self) -> None:
         """Fetch, download, index, and retain Safe Angelina fanart.
@@ -104,16 +139,18 @@ class GalleryPlugin(Star):
                 return
             try:
                 await self.gallery.sync_local_images()
-            except Exception:
+            except Exception as exc:
                 self.logger.exception("Local gallery synchronization failed.")
+                self.gallery.save_failure(f"{type(exc).__name__}: {exc}")
                 return
             added_total = 0
             added_by_tag = dict.fromkeys(TAG_MAPPING.values(), 0)
             request_succeeded = False
+            last_error: str | None = None
             pending: list[dict[str, Any]] = []
             pending_post_ids: set[int] = set()
             pending_hashes: set[str] = set()
-            cursor_state = load_danbooru_cursor(self.gallery.data_dir)
+            cursor_state = load_danbooru_cursor(self.gallery.data_dir, DANBOORU_QUERY)
             history_cursor = cursor_state.get("cursor")
             history_exhausted = cursor_state.get("exhausted") is True
             history_page_by_post_id: dict[int, str] = {}
@@ -128,8 +165,9 @@ class GalleryPlugin(Star):
                 request_succeeded = True
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                self.logger.exception("Danbooru API request failed.")
+            except Exception as exc:
+                self._log_request_failure(exc)
+                last_error = f"{type(exc).__name__}: {exc}"
                 latest_candidates = []
 
             if latest_candidates:
@@ -206,8 +244,9 @@ class GalleryPlugin(Star):
                     request_succeeded = True
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    self.logger.exception("Danbooru API request failed.")
+                except Exception as exc:
+                    self._log_request_failure(exc)
+                    last_error = f"{type(exc).__name__}: {exc}"
                     break
                 if not candidates:
                     history_exhausted = True
@@ -358,9 +397,14 @@ class GalleryPlugin(Star):
                     history_cursor = history_retry_cursor
                     history_exhausted = False
                 save_danbooru_cursor(
-                    self.gallery.data_dir, history_cursor, history_exhausted
+                    self.gallery.data_dir,
+                    history_cursor,
+                    history_exhausted,
+                    DANBOORU_QUERY,
                 )
                 self.gallery.save_state(added_total, added_by_tag)
+            else:
+                self.gallery.save_failure(last_error or "Danbooru request failed")
             self.logger.info(
                 "Gallery update for %s completed; %s image(s) added.",
                 CORE_TAG,

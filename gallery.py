@@ -181,7 +181,26 @@ class Gallery:
             "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "last_added_total": added_total,
             "last_added_by_tag": added_by_tag,
+            "last_error": None,
+            "consecutive_failures": 0,
         }
+        self._write_state(payload)
+
+    def save_failure(self, error: str) -> None:
+        """Record a failed update without touching the last success timestamp.
+
+        Args:
+            error: Short description of the failure cause.
+        """
+        payload = self.load_state()
+        payload["last_update"] = payload.get("last_update", "暂无记录")
+        payload["last_added_total"] = payload.get("last_added_total", 0)
+        payload["last_added_by_tag"] = payload.get("last_added_by_tag", {})
+        payload["last_error"] = error[:300]
+        payload["consecutive_failures"] = int(payload.get("consecutive_failures", 0)) + 1
+        self._write_state(payload)
+
+    def _write_state(self, payload: dict[str, Any]) -> None:
         temporary = self.state_path.with_suffix(".json.tmp")
         temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"

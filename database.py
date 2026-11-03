@@ -230,6 +230,32 @@ class GalleryDatabase:
         await cursor.close()
         return int(row["count"] if row else 0)
 
+    async def count_distinct_for_tags(self, tags: list[str]) -> int:
+        """Count distinct images associated with at least one of the tags.
+
+        Args:
+            tags: Canonical Danbooru tag names.
+
+        Returns:
+            Number of unique images matching any tag.
+        """
+        unique_tags = list(dict.fromkeys(tags))
+        if not unique_tags:
+            return 0
+        db = self._require_connection()
+        placeholders = ", ".join("?" for _ in unique_tags)
+        cursor = await db.execute(
+            f"""
+            SELECT COUNT(DISTINCT image_tags.image_id) AS count
+            FROM image_tags JOIN tags ON tags.id = image_tags.tag_id
+            WHERE tags.name IN ({placeholders})
+            """,
+            unique_tags,
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return int(row["count"] if row else 0)
+
     async def random_image_for_tag(self, tag: str) -> dict[str, Any] | None:
         """Return one random image associated with a tag."""
         return await self.random_image(tag)
